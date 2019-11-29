@@ -5,10 +5,12 @@ authors = ["Chase Wilson <kixiron.contact@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+threadpool = "1.7.1"
 
 [dev-dependencies]
 criterion = "0.3.0"
 rand = "0.7.2"
+threadpool = "1.7.1"
 
 [[bench]]
 name = "quicksort"

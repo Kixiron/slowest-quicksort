@@ -217,3 +217,142 @@ pub mod lockful {
         })
     }
 }
+
+pub mod threadpool {
+    use std::sync::{mpsc, Arc, Mutex};
+    use threadpool::ThreadPool;
+
+    pub fn quicksort(
+        vec: Arc<Mutex<Box<Box<Vec<Box<Box<Box<Arc<Mutex<usize>>>>>>>>>>,
+        low: Box<Box<Box<Arc<Mutex<usize>>>>>,
+        high: Box<Box<Box<Arc<Mutex<usize>>>>>,
+        pool: ThreadPool,
+    ) {
+        let p = pool.clone();
+        pool.execute(move || {
+            if *low.lock().unwrap() < *high.lock().unwrap() {
+                // Choose a pivot
+                let v = vec.clone();
+                let pivot = partition(v, low.clone(), high.clone(), p.clone());
+
+                // Sort the lower sub-array
+                quicksort(
+                    vec.clone(),
+                    low.clone(),
+                    Box::new(Box::new(Box::new(Arc::new(Mutex::new(
+                        (*pivot).lock().unwrap().saturating_sub(1),
+                    ))))),
+                    p.clone(),
+                );
+
+                // Sort the higher sub-array
+                quicksort(
+                    vec.clone(),
+                    Box::new(Box::new(Box::new(Arc::new(Mutex::new(
+                        *pivot.lock().unwrap() + 1,
+                    ))))),
+                    high,
+                    p.clone(),
+                );
+            }
+        });
+    }
+
+    fn partition(
+        vec: Arc<Mutex<Box<Box<Vec<Box<Box<Box<Arc<Mutex<usize>>>>>>>>>>,
+        low: Box<Box<Box<Arc<Mutex<usize>>>>>,
+        high: Box<Box<Box<Arc<Mutex<usize>>>>>,
+        pool: ThreadPool,
+    ) -> Box<Box<Box<Arc<Mutex<usize>>>>> {
+        let (send, recv) = mpsc::channel();
+
+        pool.execute(move || {
+            let pivot = vec.lock().unwrap()[*high.lock().unwrap()].clone();
+            let i = low.clone();
+
+            // For each element in the sub-array
+            for j in *low.lock().unwrap()..*high.lock().unwrap() {
+                // If the item is less than the pivot
+                if *vec.lock().unwrap()[j].lock().unwrap() < *pivot.lock().unwrap() {
+                    // Swap the i'th and j'th item
+                    vec.lock().unwrap().swap(*i.lock().unwrap(), j);
+                    // Increment i
+                    *i.lock().unwrap() += 1;
+                }
+            }
+
+            // Swap the highest element and the i'th element
+            vec.lock()
+                .unwrap()
+                .swap(*i.lock().unwrap(), *high.lock().unwrap());
+
+            // Return the pivot point
+            send.send(i).unwrap();
+        });
+
+        recv.recv().unwrap()
+    }
+}
+
+pub mod locked_no_threads {
+    use std::sync::{Arc, Mutex};
+
+    pub fn quicksort(
+        vec: Arc<Mutex<Box<Box<Vec<Box<Box<Box<Arc<Mutex<usize>>>>>>>>>>,
+        low: Box<Box<Box<Arc<Mutex<usize>>>>>,
+        high: Box<Box<Box<Arc<Mutex<usize>>>>>,
+    ) {
+        println!("Quicksorting");
+        if *low.lock().unwrap() < *high.lock().unwrap() {
+            // Choose a pivot
+            let v = vec.clone();
+            let pivot = partition(v, low.clone(), high.clone());
+
+            // Sort the lower sub-array
+            quicksort(
+                vec.clone(),
+                low.clone(),
+                Box::new(Box::new(Box::new(Arc::new(Mutex::new(
+                    (*pivot).lock().unwrap().saturating_sub(1),
+                ))))),
+            );
+
+            // Sort the higher sub-array
+            quicksort(
+                vec.clone(),
+                Box::new(Box::new(Box::new(Arc::new(Mutex::new(
+                    *pivot.lock().unwrap() + 1,
+                ))))),
+                high,
+            );
+        }
+    }
+
+    fn partition(
+        vec: Arc<Mutex<Box<Box<Vec<Box<Box<Box<Arc<Mutex<usize>>>>>>>>>>,
+        low: Box<Box<Box<Arc<Mutex<usize>>>>>,
+        high: Box<Box<Box<Arc<Mutex<usize>>>>>,
+    ) -> Box<Box<Box<Arc<Mutex<usize>>>>> {
+        println!("Partition");
+        let pivot = vec.lock().unwrap()[*high.lock().unwrap()].clone();
+        let i = low.clone();
+
+        // For each element in the sub-array
+        for j in *low.lock().unwrap()..*high.lock().unwrap() {
+            // If the item is less than the pivot
+            if *vec.lock().unwrap()[j].lock().unwrap() < *pivot.lock().unwrap() {
+                // Swap the i'th and j'th item
+                vec.lock().unwrap().swap(*i.lock().unwrap(), j);
+                // Increment i
+                *i.lock().unwrap() += 1;
+            }
+        }
+
+        // Swap the highest element and the i'th element
+        vec.lock()
+            .unwrap()
+            .swap(*i.lock().unwrap(), *high.lock().unwrap());
+
+        i
+    }
+}

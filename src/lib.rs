@@ -143,6 +143,29 @@ pub mod realloc {
         // Return the pivot point
         i
     }
+
+    #[test]
+    fn test() {
+        use rand::{distributions::Standard, thread_rng, Rng};
+
+        let rng = thread_rng();
+        let vec: Vec<usize> = rng.sample_iter(Standard).take(100_000).collect();
+        let (low, high) = (0, vec.len() - 1);
+        let vec: Box<Box<Vec<Box<Box<Box<usize>>>>>> = Box::new(Box::new(
+            vec.clone()
+                .into_iter()
+                .map(|elem| Box::new(Box::new(Box::new(elem))))
+                .collect(),
+        ));
+
+        let time = std::time::Instant::now();
+        quicksort(
+            &mut vec.clone(),
+            Box::new(Box::new(Box::new(low))),
+            Box::new(Box::new(Box::new(high))),
+        );
+        println!("{:?}", time.elapsed());
+    }
 }
 
 pub mod lockful {

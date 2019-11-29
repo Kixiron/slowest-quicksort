@@ -302,7 +302,6 @@ pub mod locked_no_threads {
         low: Box<Box<Box<Arc<Mutex<usize>>>>>,
         high: Box<Box<Box<Arc<Mutex<usize>>>>>,
     ) {
-        println!("Quicksorting");
         if *low.lock().unwrap() < *high.lock().unwrap() {
             // Choose a pivot
             let v = vec.clone();
@@ -333,7 +332,6 @@ pub mod locked_no_threads {
         low: Box<Box<Box<Arc<Mutex<usize>>>>>,
         high: Box<Box<Box<Arc<Mutex<usize>>>>>,
     ) -> Box<Box<Box<Arc<Mutex<usize>>>>> {
-        println!("Partition");
         let pivot = vec.lock().unwrap()[*high.lock().unwrap()].clone();
         let i = low.clone();
 

@@ -143,31 +143,9 @@ pub mod realloc {
         // Return the pivot point
         i
     }
-
-    #[test]
-    fn test() {
-        use rand::{distributions::Standard, thread_rng, Rng};
-
-        let rng = thread_rng();
-        let vec: Vec<usize> = rng.sample_iter(Standard).take(100_000).collect();
-        let (low, high) = (0, vec.len() - 1);
-        let vec: Box<Box<Vec<Box<Box<Box<usize>>>>>> = Box::new(Box::new(
-            vec.clone()
-                .into_iter()
-                .map(|elem| Box::new(Box::new(Box::new(elem))))
-                .collect(),
-        ));
-
-        let time = std::time::Instant::now();
-        quicksort(
-            &mut vec.clone(),
-            Box::new(Box::new(Box::new(low))),
-            Box::new(Box::new(Box::new(high))),
-        );
-        println!("{:?}", time.elapsed());
-    }
 }
 
+// Deadlock
 pub mod lockful {
     use std::{
         sync::{Arc, Mutex},
@@ -241,6 +219,7 @@ pub mod lockful {
     }
 }
 
+// Deadlock
 pub mod threadpool {
     use std::sync::{mpsc, Arc, Mutex};
     use threadpool::ThreadPool;
@@ -317,6 +296,7 @@ pub mod threadpool {
     }
 }
 
+// No deadlock
 pub mod locked_no_threads {
     use std::sync::{Arc, Mutex};
 
@@ -335,16 +315,14 @@ pub mod locked_no_threads {
                 vec.clone(),
                 low.clone(),
                 Box::new(Box::new(Box::new(Arc::new(Mutex::new(
-                    (*pivot).lock().unwrap().saturating_sub(1),
+                    pivot.saturating_sub(1),
                 ))))),
             );
 
             // Sort the higher sub-array
             quicksort(
                 vec.clone(),
-                Box::new(Box::new(Box::new(Arc::new(Mutex::new(
-                    *pivot.lock().unwrap() + 1,
-                ))))),
+                Box::new(Box::new(Box::new(Arc::new(Mutex::new(pivot + 1))))),
                 high,
             );
         }
@@ -354,25 +332,26 @@ pub mod locked_no_threads {
         vec: Arc<Mutex<Box<Box<Vec<Box<Box<Box<Arc<Mutex<usize>>>>>>>>>>,
         low: Box<Box<Box<Arc<Mutex<usize>>>>>,
         high: Box<Box<Box<Arc<Mutex<usize>>>>>,
-    ) -> Box<Box<Box<Arc<Mutex<usize>>>>> {
-        let pivot = vec.lock().unwrap()[*high.lock().unwrap()].clone();
-        let i = low.clone();
-
+    ) -> usize {
+        let mut i = *low.lock().unwrap();
         // For each element in the sub-array
-        for j in *low.lock().unwrap()..*high.lock().unwrap() {
+        let (l, h): (usize, usize) = (*low.lock().unwrap(), *high.lock().unwrap());
+        for j in l..h {
             // If the item is less than the pivot
-            if *vec.lock().unwrap()[j].lock().unwrap() < *pivot.lock().unwrap() {
+            let piv: usize = *vec.lock().unwrap()[*high.lock().unwrap()].lock().unwrap();
+            let left: usize = *vec.lock().unwrap()[j].lock().unwrap();
+            if left < piv {
                 // Swap the i'th and j'th item
-                vec.lock().unwrap().swap(*i.lock().unwrap(), j);
+                (*vec.lock().unwrap()).swap(i, j);
+
                 // Increment i
-                *i.lock().unwrap() += 1;
+                i += 1;
             }
         }
 
         // Swap the highest element and the i'th element
-        vec.lock()
-            .unwrap()
-            .swap(*i.lock().unwrap(), *high.lock().unwrap());
+        let temp_high = *high.lock().unwrap();
+        vec.lock().unwrap().swap(i, temp_high);
 
         i
     }

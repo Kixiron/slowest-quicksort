@@ -145,81 +145,91 @@ pub mod realloc {
     }
 }
 
-// Deadlock
 pub mod lockful {
     use std::{
-        sync::{Arc, Mutex},
-        thread::{self, JoinHandle},
+        sync::{mpsc, Arc, Mutex},
+        thread,
     };
 
     pub fn quicksort(
         vec: Arc<Mutex<Box<Box<Vec<Box<Box<Box<Arc<Mutex<usize>>>>>>>>>>,
         low: Box<Box<Box<Arc<Mutex<usize>>>>>,
         high: Box<Box<Box<Arc<Mutex<usize>>>>>,
-    ) -> JoinHandle<()> {
+    ) {
+        // Create a channel so we know when the algorithm is done
+        let (send, recv) = mpsc::channel::<()>();
+
+        // Spawn the thread that will do all the work
         thread::spawn(move || {
             if *low.lock().unwrap() < *high.lock().unwrap() {
                 // Choose a pivot
-                let v = vec.clone();
-                let pivot = partition(v, low.clone(), high.clone()).join().unwrap();
+                let pivot = partition(vec.clone(), low.clone(), high.clone());
 
                 // Sort the lower sub-array
                 quicksort(
                     vec.clone(),
                     low.clone(),
                     Box::new(Box::new(Box::new(Arc::new(Mutex::new(
-                        (*pivot).lock().unwrap().saturating_sub(1),
+                        pivot.saturating_sub(1),
                     ))))),
-                )
-                .join()
-                .unwrap();
+                );
 
                 // Sort the higher sub-array
                 quicksort(
                     vec.clone(),
-                    Box::new(Box::new(Box::new(Arc::new(Mutex::new(
-                        *pivot.lock().unwrap() + 1,
-                    ))))),
+                    Box::new(Box::new(Box::new(Arc::new(Mutex::new(pivot + 1))))),
                     high,
-                )
-                .join()
-                .unwrap();
+                );
             }
-        })
+
+            // Notify the main thread that the calculation is finished
+            send.send(()).unwrap();
+        });
+
+        // Block the thread until the calculation is finished
+        recv.recv().unwrap()
     }
 
     fn partition(
         vec: Arc<Mutex<Box<Box<Vec<Box<Box<Box<Arc<Mutex<usize>>>>>>>>>>,
         low: Box<Box<Box<Arc<Mutex<usize>>>>>,
         high: Box<Box<Box<Arc<Mutex<usize>>>>>,
-    ) -> JoinHandle<Box<Box<Box<Arc<Mutex<usize>>>>>> {
+    ) -> usize {
+        // Create a channel so we can get the pivot point
+        let (send, recv) = mpsc::channel::<usize>();
+
+        // Spawn the thread that will do all the calculation
         thread::spawn(move || {
-            let pivot = vec.lock().unwrap()[*high.lock().unwrap()].clone();
-            let i = low.clone();
+            let mut i = *low.lock().unwrap();
 
             // For each element in the sub-array
-            for j in *low.lock().unwrap()..*high.lock().unwrap() {
+            let (l, h): (usize, usize) = (*low.lock().unwrap(), *high.lock().unwrap());
+            for j in l..h {
                 // If the item is less than the pivot
-                if *vec.lock().unwrap()[j].lock().unwrap() < *pivot.lock().unwrap() {
+                let piv: usize = *vec.lock().unwrap()[*high.lock().unwrap()].lock().unwrap();
+                let left: usize = *vec.lock().unwrap()[j].lock().unwrap();
+                if left < piv {
                     // Swap the i'th and j'th item
-                    vec.lock().unwrap().swap(*i.lock().unwrap(), j);
+                    (*vec.lock().unwrap()).swap(i, j);
+
                     // Increment i
-                    *i.lock().unwrap() += 1;
+                    i += 1;
                 }
             }
 
             // Swap the highest element and the i'th element
-            vec.lock()
-                .unwrap()
-                .swap(*i.lock().unwrap(), *high.lock().unwrap());
+            let temp_high = *high.lock().unwrap();
+            vec.lock().unwrap().swap(i, temp_high);
 
             // Return the pivot point
-            i
-        })
+            send.send(i).unwrap();
+        });
+
+        // Get the pivot point and return it
+        recv.recv().unwrap()
     }
 }
 
-// Deadlock
 pub mod threadpool {
     use std::sync::{mpsc, Arc, Mutex};
     use threadpool::ThreadPool;
@@ -230,19 +240,24 @@ pub mod threadpool {
         high: Box<Box<Box<Arc<Mutex<usize>>>>>,
         pool: ThreadPool,
     ) {
+        // Clone the threadpool (Only clones pointers) so we can move it into the threadpool closure
         let p = pool.clone();
+
+        // Create a channel so we know when the algorithm is done
+        let (send, recv) = mpsc::channel::<()>();
+
+        // Execute the function in the threadpool
         pool.execute(move || {
             if *low.lock().unwrap() < *high.lock().unwrap() {
                 // Choose a pivot
-                let v = vec.clone();
-                let pivot = partition(v, low.clone(), high.clone(), p.clone());
+                let pivot = partition(vec.clone(), low.clone(), high.clone(), p.clone());
 
                 // Sort the lower sub-array
                 quicksort(
                     vec.clone(),
                     low.clone(),
                     Box::new(Box::new(Box::new(Arc::new(Mutex::new(
-                        (*pivot).lock().unwrap().saturating_sub(1),
+                        pivot.saturating_sub(1),
                     ))))),
                     p.clone(),
                 );
@@ -250,14 +265,18 @@ pub mod threadpool {
                 // Sort the higher sub-array
                 quicksort(
                     vec.clone(),
-                    Box::new(Box::new(Box::new(Arc::new(Mutex::new(
-                        *pivot.lock().unwrap() + 1,
-                    ))))),
+                    Box::new(Box::new(Box::new(Arc::new(Mutex::new(pivot + 1))))),
                     high,
                     p.clone(),
                 );
             }
+
+            // The calculation is finished, so tell the main thread
+            send.send(()).unwrap();
         });
+
+        // Blocks the thread until the calculation is finished
+        recv.recv().unwrap()
     }
 
     fn partition(
@@ -265,38 +284,42 @@ pub mod threadpool {
         low: Box<Box<Box<Arc<Mutex<usize>>>>>,
         high: Box<Box<Box<Arc<Mutex<usize>>>>>,
         pool: ThreadPool,
-    ) -> Box<Box<Box<Arc<Mutex<usize>>>>> {
+    ) -> usize {
+        // Create the sender and receiver for communicating with the threadpool
         let (send, recv) = mpsc::channel();
 
+        // Execute the function in the threadpool
         pool.execute(move || {
-            let pivot = vec.lock().unwrap()[*high.lock().unwrap()].clone();
-            let i = low.clone();
+            let mut i = *low.lock().unwrap();
 
             // For each element in the sub-array
-            for j in *low.lock().unwrap()..*high.lock().unwrap() {
+            let (l, h) = (*low.lock().unwrap(), *high.lock().unwrap());
+            for j in l..h {
+                let pivot_value = *vec.lock().unwrap()[*high.lock().unwrap()].lock().unwrap();
+                let j_value = *vec.lock().unwrap()[j].lock().unwrap();
+
                 // If the item is less than the pivot
-                if *vec.lock().unwrap()[j].lock().unwrap() < *pivot.lock().unwrap() {
+                if j_value < pivot_value {
                     // Swap the i'th and j'th item
-                    vec.lock().unwrap().swap(*i.lock().unwrap(), j);
+                    (*vec.lock().unwrap()).swap(i, j);
+
                     // Increment i
-                    *i.lock().unwrap() += 1;
+                    i += 1;
                 }
             }
 
             // Swap the highest element and the i'th element
-            vec.lock()
-                .unwrap()
-                .swap(*i.lock().unwrap(), *high.lock().unwrap());
+            vec.lock().unwrap().swap(i, *high.lock().unwrap());
 
-            // Return the pivot point
+            // Send the pivot point
             send.send(i).unwrap();
         });
 
+        // Receive and return the pivot point
         recv.recv().unwrap()
     }
 }
 
-// No deadlock
 pub mod locked_no_threads {
     use std::sync::{Arc, Mutex};
 
@@ -307,8 +330,7 @@ pub mod locked_no_threads {
     ) {
         if *low.lock().unwrap() < *high.lock().unwrap() {
             // Choose a pivot
-            let v = vec.clone();
-            let pivot = partition(v, low.clone(), high.clone());
+            let pivot = partition(vec.clone(), low.clone(), high.clone());
 
             // Sort the lower sub-array
             quicksort(
@@ -334,12 +356,14 @@ pub mod locked_no_threads {
         high: Box<Box<Box<Arc<Mutex<usize>>>>>,
     ) -> usize {
         let mut i = *low.lock().unwrap();
+
         // For each element in the sub-array
         let (l, h): (usize, usize) = (*low.lock().unwrap(), *high.lock().unwrap());
         for j in l..h {
-            // If the item is less than the pivot
             let piv: usize = *vec.lock().unwrap()[*high.lock().unwrap()].lock().unwrap();
             let left: usize = *vec.lock().unwrap()[j].lock().unwrap();
+
+            // If the item is less than the pivot
             if left < piv {
                 // Swap the i'th and j'th item
                 (*vec.lock().unwrap()).swap(i, j);
@@ -353,6 +377,7 @@ pub mod locked_no_threads {
         let temp_high = *high.lock().unwrap();
         vec.lock().unwrap().swap(i, temp_high);
 
+        // Return the pivot point
         i
     }
 }

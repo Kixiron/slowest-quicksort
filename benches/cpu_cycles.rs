@@ -1,20 +1,21 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion_cycles_per_byte::CyclesPerByte;
 use rand::{distributions::Standard, thread_rng, Rng};
 use slowest_quicksort::{boxed, locked_no_threads, lockful, normal, realloc};
 use std::sync::{Arc, Mutex};
 
-fn benchmarks(c: &mut Criterion) {
+fn cpu_benches(c: &mut Criterion<CyclesPerByte>) {
     let rng = thread_rng();
 
     let vec: Vec<usize> = rng.sample_iter(Standard).take(100_000).collect();
     let (low, high) = (0, vec.len() - 1);
 
-    c.bench_function("Normal Quicksort", |b| {
+    c.bench_function("Normal Quicksort [CPU Cycles]", |b| {
         b.iter(|| {
             normal::quicksort(black_box(&mut vec.clone()), black_box(low), black_box(high));
         });
     })
-    .bench_function("Boxed Quicksort", |b| {
+    .bench_function("Boxed Quicksort [CPU Cycles]", |b| {
         b.iter(|| {
             let vec: Box<Box<Vec<Box<Box<Box<usize>>>>>> = Box::new(Box::new(
                 vec.clone()
@@ -30,7 +31,7 @@ fn benchmarks(c: &mut Criterion) {
             )
         });
     })
-    .bench_function("Allocating Quicksort", |b| {
+    .bench_function("Allocating Quicksort [CPU Cycles]", |b| {
         b.iter(|| {
             let vec: Box<Box<Vec<Box<Box<Box<usize>>>>>> = Box::new(Box::new(
                 vec.clone()
@@ -46,7 +47,7 @@ fn benchmarks(c: &mut Criterion) {
             )
         });
     })
-    .bench_function("Lockful Quicksort", |b| {
+    .bench_function("Lockful Quicksort [CPU Cycles]", |b| {
         b.iter(|| {
             let vec: Arc<Mutex<Box<Box<Vec<Box<Box<Box<Arc<Mutex<usize>>>>>>>>>> =
                 Arc::new(Mutex::new(Box::new(Box::new(
@@ -63,7 +64,7 @@ fn benchmarks(c: &mut Criterion) {
             );
         });
     })
-    .bench_function("Threadpool Quicksort", |b| {
+    .bench_function("Threadpool Quicksort [CPU Cycles]", |b| {
         b.iter(|| {
             let vec: Arc<Mutex<Box<Box<Vec<Box<Box<Box<Arc<Mutex<usize>>>>>>>>>> =
                 Arc::new(Mutex::new(Box::new(Box::new(
@@ -86,7 +87,7 @@ fn benchmarks(c: &mut Criterion) {
             );
         })
     })
-    .bench_function("Threadless Locked Quicksort", |b| {
+    .bench_function("Threadless Locked Quicksort [CPU Cycles]", |b| {
         b.iter(|| {
             let vec: Arc<Mutex<Box<Box<Vec<Box<Box<Box<Arc<Mutex<usize>>>>>>>>>> =
                 Arc::new(Mutex::new(Box::new(Box::new(
@@ -105,5 +106,9 @@ fn benchmarks(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, benchmarks);
-criterion_main!(benches);
+criterion_group!(
+    name = cpu_cycles;
+    config = Criterion::default().with_measurement(CyclesPerByte);
+    targets = cpu_benches
+);
+criterion_main!(cpu_cycles);
